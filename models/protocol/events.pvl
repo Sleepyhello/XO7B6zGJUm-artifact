@@ -1,0 +1,65 @@
+(* -------------------------------------------------------------------------*)
+(*   events.pvl                                                             *)
+(*                                                                          *)
+(*   This file contains the declarations of all events used in the model.   *)
+(* -------------------------------------------------------------------------*)
+
+
+(* A buildInfo is declared to lead to a positive or negative verdict *)
+event BuildInfoAndVerdict(bitstring, bool).
+
+(* A userCred is declared allowed or not to install an appID *)
+event UserCredAllowed(userCredential, appIdentifier, bool).
+
+(* A certificate is declared correct or incorrect for the appID *)
+event AppCertificateCorrect(appIdentifier, bitstring, bool).
+
+(* The device with deviceID is rooted|unrooted|…, and patched or not patched *)
+event DeviceStatus(deviceIdentifier, status, bool).
+
+(* The userCred belongs to the device *)
+event UserCredOnDevice(deviceIdentifier, userCredential).
+
+(* An appID belongs to an honest app, or an attacker app *)
+event HonestAppID(appIdentifier).
+event AttackerAppID(appIdentifier).
+
+(* An appID is used on the device, by a honest, attacker, or spoofed app,
+   from the playstore or not, with some app certificate *)
+event RealAppOnDevice(deviceIdentifier, appIdentifier, bool, bitstring).
+event AttackerAppOnDevice(deviceIdentifier, appIdentifier, bool, bitstring).
+event SpoofedAppOnDevice(deviceIdentifier, appIdentifier, bitstring).
+
+
+(* The app receives a nonce, and a response *)
+event AppNonce(appIdentifier, deviceIdentifier, bitstring).
+event AppResponse(appIdentifier, deviceIdentifier, bitstring, bitstring).
+
+(* The App Cloud generates a nonce, and receives and decrypts a verdict *)
+event AppCloudNonce(appIdentifier, deviceIdentifier, bitstring).
+event AppCloudVerdict(appIdentifier, deviceIdentifier,
+                      bitstring, bitstring,
+                      bool, bool, bool, bool).
+
+(* PlayIntegrity receives a nonce, sends a request to Google, gets a response *)
+event PINonce(appIdentifier, deviceIdentifier, appIdentifier, bitstring).
+event PIRequest(appIdentifier, deviceIdentifier, bitstring, bitstring).
+event PIResponse(appIdentifier, deviceIdentifier, bitstring, bitstring).
+
+(* Android sends the requested values to PlayIntegrity *)
+event AndroidResponse(appIdentifier, deviceIdentifier, bitstring).
+
+(* Keystore attests a message *)
+event KeystoreAttest(appIdentifier, deviceIdentifier, bitstring).
+
+
+(* Google has emitted a response in response to some request.
+       GoogleVerdict(appID, deviceID, userCred, response, v1, v2, v3, v4) *)
+event GoogleVerdict(appIdentifier, deviceIdentifier, userCredential,
+                    bitstring,
+                    bool, bool, bool, bool).
+
+
+(* records the generation of keys, used in lemmas *)
+event KeystoreFresh(signkey).
+event TEEKey(signkey).

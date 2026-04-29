@@ -1,0 +1,38 @@
+(* -------------------------------------------------------------------------*)
+(*   lemmas.pvl                                                             *)
+(*                                                                          *)
+(*   This file contains lemmas that are useful to prove                     *)
+(*   the sanity checks.                                                     *)
+(* -------------------------------------------------------------------------*)
+  
+(* only the keys of attacker apps are given to the attacker *)
+lemma appID:appIdentifier, deviceID:deviceIdentifier;
+  attacker(deriveAppKey(appID)) ==>
+  event(AttackerAppID(appID)).
+
+(* the attacker cannot learn any attestation key *)
+lemma deviceID:deviceIdentifier, appID:appIdentifier;
+    attacker(deriveAttestationKey(deviceID, appID)) ==> false.
+
+(* the attacker cannot learn any of the fresh Keystore keys *)
+lemma kFresh:signkey;
+  event(KeystoreFresh(kFresh)) && attacker(kFresh) ==> false.
+
+(* the attacker cannot learn any Keystore key *)
+lemma attacker(new kKS) ==> false.
+
+(* the attacker cannot learn Google's key *)
+lemma attacker(new kGoogle) ==> false.
+
+(* the attacker cannot learn any TEE key *)
+lemma kTEE:signkey;
+  event(TEEKey(kTEE)) && attacker(kTEE) ==> false.
+
+(* the attacker cannot learn the userCreds on unrooted devices *)
+lemma userCred:userCredential, deviceID:deviceIdentifier, b:bool;
+       event(UserCredOnDevice(deviceID, userCred))
+    && event(DeviceStatus(deviceID, unrootedDevice, b))
+    && attacker(userCred)
+  ==>
+    false.
+

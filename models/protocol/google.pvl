@@ -1,0 +1,108 @@
+(* -------------------------------------------------------------------------*)
+(*   google.pvl                                                             *)
+(*                                                                          *)
+(*   This file contains the process modelling the Google server.            *)
+(* -------------------------------------------------------------------------*)
+
+
+(* Google *)
+let Google(kGoogle:signkey,
+           cGToPI:channel, cPIToG:channel) =
+
+  (* receive and parse the request from PlayIntegrity *)
+  (* we don't send any error if the basic formatting (ie finding all fields)
+     fails, but just stop there *)
+  in(cPIToG, (piInfo:bitstring,
+              userCred:userCredential,
+              mKS:bitstring,
+              mDG:bitstring)); (* no else *)
+  (* parsing the message from PlayIntegrity, piInfo *)
+  let (n:bitstring, _:timestamp, appInfo:bitstring, deviceInfoPI:bitstring) =
+      piInfo
+  in (* no else *)
+  let (buildInfo:bitstring, deviceID:deviceIdentifier) =
+      deviceInfoPI
+  in (* no else *)
+  let (appID:appIdentifier, appSource:bool, appCert:bitstring) =
+      appInfo
+  in (* no else *)
+
+  (* parsing the message from the Keystore, mKS *)
+  let ((hPIInfo:bitstring, keyStoreInfo:bitstring),
+       s:bitstring,
+       vkFresh:verkey, skFresh:bitstring,
+       vkAttest:verkey, sAttest:bitstring,
+       vkKS:verkey, skKS:bitstring,
+       vkTEE:verkey, skTEE:bitstring,
+       vkG:verkey) = (* supposedly vkG = vk(kGoogle), this is checked later *)
+       mKS
+  in (* no else *)
+  let (piIDKS:appIdentifier, 
+       (buildInfoKS:bitstring,
+        deviceIDKS:deviceIdentifier, buildInfoVerdict:bool),
+       bootLoader:bool) =
+       keyStoreInfo
+  in (* no else *)
+  let deviceInfoKS = (buildInfoKS, deviceIDKS) in (* Keystore's deviceInfo *)
+
+  (* retrieve the key for the app, which will be used to encrypt all verdicts *)
+  let kApp = deriveAppKey(appID) in
+  new t':timestamp;
+
+  (* check that the message signed by the
+     Keystore matches the rest of the request,
+     check the signature and certificate chain,
+     check that its root is Google,
+     check that the Keystore's message contains playIntegrity's appID
+     check that the userCred is well-formed *)
+  if  hPIInfo = hash(piInfo)
+   && verify((hash(piInfo), keyStoreInfo), s, vkFresh)
+   && verify(vkb(vkFresh), skFresh, vkAttest)
+   && verify(vkb(vkAttest), sAttest, vkKS)
+   && verify(vkb(vkKS), skKS, vkTEE)
+   && verify(vkb(vkTEE), skTEE, vkG)
+   && vkG = vk(kGoogle)
+   && piIDKS = playIntegrityID
+   && validUserCred(userCred)
+  then
+   (
+    (* v1: unrooted device
+       check the value of the bootLoader field sent by the Keystore *)
+    let v1:bool = bootLoader in
+
+    (* v2: patched device
+       check the bootLoader + buildInfo fields sent by the Keystore *)
+    let v2:bool = bootLoader && buildInfoVerdict in
+
+    (* v3: uncompromised app
+       check that the app certificate in appInfo is the correct one *)
+    (* let the attacker choose arbitrarily whether this certificate
+       is the correct one for this appID.
+       (a restriction enforces that this choice is consistent, ie
+       for a given appID, a given cert is either always right or always wrong)
+     *)
+    in(pub, isCorrect:bool);
+    event AppCertificateCorrect(appID, appCert, isCorrect);
+    let v3:bool = isCorrect in
+
+    (* v4: verified installation path
+       check that the appSource is valid and that the user credential
+       can legitimately use the app *)
+    (* let the attacker choose arbitrarily whether this app is allowed
+       for this userCred
+       (a restriction enforces that this choice is consistent, ie
+       always the same for the same (userCred, appID)) *)
+    in(pub, isAllowed:bool);
+    event UserCredAllowed(userCred, appID, isAllowed);
+    let v4:bool = appSource && isAllowed in
+
+    let encVerdict = enc((appInfo, t', n, v1, v2, v3, v4), kApp) in
+    event GoogleVerdict(appID, deviceID, userCred,
+                        encVerdict, v1, v2, v3, v4);
+    out(cGToPI, encVerdict)
+   )
+  else (* bad signature/bad playIntegrityID *)
+    let encVerdict = enc((appInfo, t', n, false, false, false, false), kApp) in
+    event GoogleVerdict(appID, deviceID, userCred,
+                        encVerdict, false, false, false, false);
+    out(cGToPI, encVerdict).

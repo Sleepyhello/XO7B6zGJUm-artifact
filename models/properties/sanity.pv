@@ -1,0 +1,95 @@
+(* -------------------------------------------------------------------------*)
+(*   sanity.pv                                                              *)
+(*                                                                          *)
+(*   This file contains sanity checks/executability queries.                *)
+(* -------------------------------------------------------------------------*)
+
+(* tuning to help termination *)
+nounif x:signkey, y:signkey;
+  attacker(sign(vkb(vk( *x)), *y))/9000 [ignoreAFewTimes].
+
+nounif x:signkey;
+  attacker(vk( *x))/9000 [ignoreAFewTimes].
+
+set verboseRules = false.
+
+
+(* ------ sanity checks ------ *)
+(* sanity check:
+   it is possible to receive a verdict. *)
+query m, n:bitstring, appID:appIdentifier, deviceID:deviceIdentifier,
+      v1, v2, v3, v4:bool;
+  event(AppCloudVerdict(appID, deviceID, n, m, v1, v2, v3, v4)).
+
+
+(* sanity check:
+   it is possible to receive a positive verdict on an unrooted device. *)
+query m, n:bitstring, appID:appIdentifier, deviceID:deviceIdentifier,
+      buildInfoVerdict:bool;
+     event(DeviceStatus(deviceID, unrootedDevice, buildInfoVerdict)) 
+  && event(AppCloudVerdict(appID, deviceID, n, m, true, true, true, true)).
+
+
+(* sanity check:
+   it is possible to receive a negative verdict on v1 on a rooted device. *)
+query m, n:bitstring, appID:appIdentifier, deviceID:deviceIdentifier,
+      buildInfoVerdict:bool;
+     event(DeviceStatus(deviceID, rootedDevice, buildInfoVerdict)) 
+  && event(AppCloudVerdict(appID, deviceID, n, m, false, false, true, true)).
+
+
+(* sanity check:
+   it is possible to receive a verdict negative except on v1, v2
+   on an unpatched rooted device. *)
+query m, n:bitstring, appID:appIdentifier, deviceID:deviceIdentifier,
+       buildInfoVerdict:bool;
+     event(DeviceStatus(deviceID,
+                        unpatchedRootedDevice, buildInfoVerdict)) 
+  && event(AppCloudVerdict(appID, deviceID, n, m, false, false, true, true)).
+
+
+(* sanity check:
+   the events corresponding to a normal execution for an honest app
+   on an unrooted device
+   are executable, and yield all positive verdict *)
+query appID:appIdentifier, deviceID:deviceIdentifier,
+      userCred:userCredential,
+      n, buildInfo, ndg, appCert:bitstring,
+      t, t':timestamp,
+      kFresh, kAttest, kKS, kTEE, kGoogle:signkey;
+  let appInfo = (appID, true, appCert) in
+  let deviceInfo = (buildInfo, deviceID) in
+  let piInfo = (n, t, appInfo, deviceInfo) in
+  let mAndroid = (userCred, appInfo, deviceInfo) in
+  let deviceInfo' = (buildInfo, deviceID, true) in
+  let keyStoreInfo = (appID, deviceInfo', true) in
+  let mm = (hash(piInfo), keyStoreInfo) in
+  let mKS = (mm, sign(mm, kFresh), vk(kFresh),
+                 sign(vkb(vk(kFresh)), kAttest), vk(kAttest),
+                 sign(vkb(vk(kAttest)), kKS), vk(kKS),
+                 sign(vkb(vk(kKS)), kTEE), vk(kTEE),
+                 sign(vkb(vk(kTEE)), kGoogle), vk(kGoogle))
+  in
+  let mPI = (piInfo, userCred, mKS, ndg) in
+  let kApp = deriveAppKey(appID) in
+  let encVerdict = enc((appInfo, t', n, true, true, true, true), kApp) in
+      event(DeviceStatus(deviceID, unrootedDevice, true))
+   && event(UserCredOnDevice(deviceID, userCred))
+   && event(AppCloudNonce(appID, deviceID, n))
+   && event(AppNonce(appID, deviceID, n))
+   && event(PINonce(appID, deviceID, appID, n))
+   && event(AndroidResponse(appID, deviceID, mAndroid))
+   && event(KeystoreAttest(appID, deviceID, mKS))
+   && event(PIRequest(appID, deviceID, n, mPI))
+   && event(UserCredAllowed(userCred, appID, true))
+   && event(AppCertificateCorrect(appID, appCert, true))
+   && event(GoogleVerdict(appID, deviceID, userCred,
+                          encVerdict, true, true, true, true))
+   && event(PIResponse(appID, deviceID, n, encVerdict))
+   && event(AppResponse(appID, deviceID, n, encVerdict))
+   && event(AppCloudVerdict(appID, deviceID, n, encVerdict,
+                            true, true, true, true)).
+
+
+
+process PlayIntegritySystem

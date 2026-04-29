@@ -1,0 +1,74 @@
+(* -------------------------------------------------------------------------*)
+(*   restrictions.pvl                                                       *)
+(*                                                                          *)
+(*   This file contains restrictions used in the model.                     *)
+(*   They are not assumptions, but rather part of the modelling:            *)
+(*   e.g., some choices regarding which user credentials are allowed        *)
+(*   are made freely by the attacker in the processes, and restrictions in  *)
+(*   this file enforce that that the attacker's choices are consistent      *)
+(*   (one user credential is either always or never allowed a given app).   *)
+(* -------------------------------------------------------------------------*)
+
+
+(* An appID cannot belong to both an honest app and the attacker *)
+restriction appID:appIdentifier;
+  event(HonestAppID(appID)) && event(AttackerAppID(appID)) ==> false.
+
+(* On a given device, the same (honest) appID cannot both be used by the actual
+   honest app and spoofed by an attacker app *)
+restriction appID:appIdentifier, deviceID:deviceIdentifier,
+            appSource:bool, appCert, appCert':bitstring;
+  (   event(RealAppOnDevice(deviceID, appID, appSource, appCert))
+   && event(SpoofedAppOnDevice(deviceID, appID, appCert')) )
+  ==>
+   false.
+
+(* When spoofing an honest appID, the app certificate used
+   cannot be the real one *)
+restriction appID:appIdentifier, deviceID:deviceIdentifier, appCert:bitstring;
+  (   event(SpoofedAppOnDevice(deviceID, appID, appCert))
+   && event(AppCertificateCorrect(appID, appCert, true)) )
+  ==>
+    false.
+
+(* When an app is installed from the playStore, the certificate provided
+   cannot be incorrect. *)
+restriction appID:appIdentifier, deviceID:deviceIdentifier,
+            appCert, appCert':bitstring;
+  (   event(RealAppOnDevice(deviceID, appID, true, appCert))
+   && event(AppCertificateCorrect(appID, appCert, false)) )
+  ==>
+    false.
+
+(* A given userCred cannot be both allowed and not allowed
+   to use a given appID *)
+restriction userCred:userCredential, appID:appIdentifier,
+            isAllowed, isAllowed':bool;
+  (    event(UserCredAllowed(userCred, appID, isAllowed))
+    && event(UserCredAllowed(userCred, appID, isAllowed')) )
+  ==>
+    isAllowed = isAllowed'.
+
+
+(* A given appCertificate cannot be both correct and not correct
+   for a given appID *)
+restriction appID:appIdentifier, appCert:bitstring,
+            isCorrect, isCorrect':bool;
+  (    event(AppCertificateCorrect(appID, appCert, isCorrect))
+    && event(AppCertificateCorrect(appID, appCert, isCorrect')) )
+  ==>
+    isCorrect = isCorrect'.
+
+
+(* The verdict derived from the buildInfo
+   (in the model, sent alongside buildInfo by the Keystore,
+    in reality derived from it by Google)
+   must be consistent: the same buildInfo (even on different devices)
+   leads to the same verdict *)
+restriction buildInfo:bitstring, buildInfoVerdict, buildInfoVerdict':bool;
+  (    event(BuildInfoAndVerdict(buildInfo, buildInfoVerdict))
+    && event(BuildInfoAndVerdict(buildInfo, buildInfoVerdict')) )
+  ==>
+   buildInfoVerdict = buildInfoVerdict'.
+
+

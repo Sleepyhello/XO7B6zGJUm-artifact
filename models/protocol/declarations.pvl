@@ -1,0 +1,111 @@
+(* -------------------------------------------------------------------------*)
+(*   declarations.pvl                                                       *)
+(*                                                                          *)
+(*   This file contains the declarations of the cryptographic primitives,   *)
+(*   types, and constants used in the model.                                *)
+(* -------------------------------------------------------------------------*)
+
+
+(* ---------------------------------- *)
+(* function symbols, types, equations *)
+
+(* symmetric encryption *)
+type symkey.
+
+fun enc(bitstring, symkey):bitstring.
+
+reduc forall m:bitstring, k:symkey;
+  dec(enc(m, k), k) = m.
+  
+
+(* signatures *)
+type signkey.
+type verkey.
+fun vkb(verkey):bitstring [typeConverter].
+
+fun vk(signkey):verkey.
+
+fun sign(bitstring, signkey):bitstring.
+
+fun verify(bitstring, bitstring, verkey):bool
+  reduc forall m:bitstring, k:signkey;
+        verify(m, sign(m, k), vk(k)) = true
+  otherwise forall m, s:bitstring, v:verkey;
+        verify(m, s, v) = false.      
+
+(* hashing *)
+fun hash(bitstring):bitstring.
+
+
+(* asymmetric encryption *)
+type aenckey.
+type adeckey.
+
+fun pk(adeckey):aenckey.
+
+fun aenc(bitstring, aenckey):bitstring.
+
+reduc forall m:bitstring, k:adeckey;
+  adec(aenc(m, pk(k)), k) = m.
+
+
+
+(* ---------------------------------- *)
+(* constants and types                *)
+
+free pub:channel. (* public channel *)
+
+type appIdentifier.    (* = package names *)
+type deviceIdentifier. (* = serial number *)
+type userCredential.
+type timestamp.
+
+(* PlayIntegrity's identifier is fixed and public *)
+free playIntegrityID:appIdentifier.
+
+(* A private function to model the Keystore on each device having
+   a different, secret key to use for each app/package name
+   (abstracts key provisioning by the Keystore) *)
+fun deriveAttestationKey(deviceIdentifier, appIdentifier):signkey [private].
+
+(* Each device is assumed to have only one user, we do not model
+   the multi-user setting.
+   Thus we model the user credential as derived from the deviceID by
+   a private constructor *)
+fun deriveUserCredential(deviceIdentifier):userCredential [private].
+
+(* A private destructor, used by Google, to check whether a user credential
+   is well-formed *)
+fun validUserCred(userCredential):bool
+  reduc forall deviceID:deviceIdentifier;
+    validUserCred(deriveUserCredential(deviceID)) = true
+  otherwise forall x:userCredential;
+    validUserCred(x) = false
+  [private].
+
+(* A private destructor, used by Google (in the mitigation)
+   or to express properties,
+   can be used to check the deviceID associated to a userCredential,
+   modelling Google's database. *)
+fun userCredOnDevice(deviceIdentifier, userCredential):bool
+  reduc forall deviceID:deviceIdentifier, r:bitstring;
+    userCredOnDevice(deviceID, deriveUserCredential(deviceID)) = true
+  otherwise forall deviceID:deviceIdentifier, x:userCredential;
+    userCredOnDevice(deviceID, x) = false
+  [private].
+
+
+(* Each App Cloud shares a secret symmetric key with Google *)
+fun deriveAppKey(appIdentifier):symkey [private].
+
+(* To express events and restrictions about the status of devices *)
+type status.
+
+(* The possible statuses regarding rooting for a deviceID *)
+const rootedDevice:status.   (* rooted *)
+const unrootedDevice:status. (* not rooted *)
+const unpatchedRootedDevice:status.    (* rooted without changing the bootloader
+                               (only possible on unpatched devices) *)
+
+
+

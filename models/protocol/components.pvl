@@ -1,0 +1,206 @@
+(* -------------------------------------------------------------------------*)
+(*   components.pvl                                                         *)
+(*                                                                          *)
+(*   This file contains processes modelling each component of the protocol  *)
+(*     (Keystore, App, etc.) except the Google server.                      *)
+(* -------------------------------------------------------------------------*)
+
+
+(* In several places, processes take as parameters values that must exist,
+   but which they do not themselves know -- typically, the deviceID
+   of the device they run on.
+   In such cases, the processes cannot use these values,
+   but it is fine to use them in events.
+   For instance we may want to record that some component
+   running on device deviceID has reached some point in its execution
+   (even though it does not know the value of deviceID).
+   To make this clearer and avoid confusion, we prefix the name of such
+   ghost parameters with the letter g. *)
+
+(* Application
+   An app with a given appID, running on a device with id gDeviceID,
+   executing one session of the protocol,
+   with channels to its cloud and to PlayIntegrity (on the device it runs on).
+   gDeviceID exists since an app must run on a device. *)
+let App(appID:appIdentifier, gDeviceID:deviceIdentifier,
+        cAppToPI:channel, cPIToApp:channel,
+        cAppToCloud:channel, cCloudToApp:channel) =
+  (* get the nonce from the cloud server, forward it (and the appID)
+     to PlayIntegrity *)
+  in(cCloudToApp, n:bitstring);
+  event AppNonce(appID, gDeviceID, n);
+  out(cAppToPI, (appID, n));
+
+  (* receive Google's response from PlayIntegrity, forward it to the cloud *)
+  in(cPIToApp, respGoogle:bitstring);
+  event AppResponse(appID, gDeviceID, n, respGoogle);
+  out(cAppToCloud, respGoogle).
+
+
+
+(* Cloud Server
+   The cloud server instance talking to an instance of an app with id appID
+   which runs on a device with id gDeviceID.
+   Note that the server does not exist "by itself": we assume that
+   the attacker cannot corrupt credentials internally used by honest apps,
+   so that a session on the cloud server can only be created
+   together with an instance of an app, that must run on some device.
+   Hence gDeviceID exists, though the server does not know it. *)
+let AppCloud(appID:appIdentifier, gDeviceID:deviceIdentifier,
+             cCloudToApp:channel, cAppToCloud:channel) =
+  (* get the app key *)
+  let kApp = deriveAppKey(appID) in
+
+  (* generate and send the nonce to the app *)
+  new n:bitstring;
+  event AppCloudNonce(appID, gDeviceID, n);
+  out(cCloudToApp, n);
+
+  (* receive the response from the app,
+     check that the nonce is as expected *)
+  in(cAppToCloud, respGoogle:bitstring);
+  let (appInfo:bitstring, _:timestamp, =n,
+       v1:bool,
+       v2:bool,
+       v3:bool,
+       v4:bool)
+      = dec(respGoogle, kApp)
+  in
+  event AppCloudVerdict(appID, gDeviceID, n, respGoogle, v1, v2, v3, v4).
+
+
+
+(* PlayIntegrity
+   runs a session of the protocol, with an app gAppID, on a device gDeviceID,
+   with channels to the app, DroidGuard, the Keystore, Android, and Google.
+   Only an app can talk to PlatIntegrity, so gAppID must exist,
+   but PlayIntegrity itself does not know either gAppID or gDeviceID
+   (it only knows the alleged appID it receives from the app). *)
+let PlayIntegrity(gAppID:appIdentifier, gDeviceID:deviceIdentifier,
+                  cPIToApp:channel, cAppToPI:channel,
+                  cPIToOS:channel, cOSToPI:channel,
+                  cPIToKS:channel, cKSToPI:channel,
+                  cPIToDG:channel, cDGToPI:channel,
+                  cPIToG:channel, cGToPI:channel) =
+  (* receive the request from the app *)
+  in(cAppToPI, (appID:appIdentifier, n:bitstring));
+  event PINonce(gAppID, gDeviceID, appID, n);
+  
+  (* generate the timestamp (and publish it, it is not secret) *)
+  new t:timestamp; out(pub, t);
+
+  (* ask Android for all relevant info *)
+  out(cPIToOS, appID);
+  in(cOSToPI,
+     (userCred:userCredential,
+      appInfo:bitstring,
+      deviceInfo:bitstring)); 
+
+  (* send nonce, timestamp, app info and device info to
+     DroidGuard and Keystore, get their responses back *)
+  let piInfo:bitstring =
+    (n, t, appInfo, deviceInfo)
+  in
+  out(cPIToKS, piInfo);
+  in(cKSToPI, mKS:bitstring);
+  out(cPIToDG, piInfo);
+  in(cDGToPI, mDG:bitstring);
+
+  (* send everything to Google, get the response, and forward it to the app *)
+  let mPI = (piInfo, userCred, mKS, mDG) in
+  event PIRequest(gAppID, gDeviceID, n, mPI);
+  out(cPIToG, mPI);
+
+  in(cGToPI, respGoogle:bitstring);
+  event PIResponse(gAppID, gDeviceID, n, respGoogle);
+  out(cPIToApp, respGoogle).
+
+
+
+(* Android
+   AndroidOS models as a single entity various components of Android:
+   - Authentication Manager, which provides the user credential
+   - Package Manager, which knows which appID really is talking
+                      to PlayIntegrity, and provides the app info
+   - Android, which provides the device info. *)
+let AndroidOS(appID:appIdentifier,
+              userCred:userCredential,
+              appSource:bool,
+              appCert:bitstring,
+              deviceID:deviceIdentifier,
+              buildInfo:bitstring,
+              cOSToPI:channel, cPIToOS:channel) =
+  in(cPIToOS, =appID);
+  let appInfo = (appID, appSource, appCert) in
+  let deviceInfo = (buildInfo, deviceID) in
+  let mAndroid = (userCred, appInfo, deviceInfo) in
+  event AndroidResponse(appID, deviceID, mAndroid);
+  out(cOSToPI, mAndroid).
+
+
+
+(* Keystore
+   The Keystore, called by an app with some appID, on some device,
+   signs any message and sends back the signature.
+   Careful with appID: it's the id of the app calling keystore, so
+   when called by playintegrity it should use its own id.
+   abstraction of the verdicts:
+   - in reality, the Keystore sends buildInfo, which contains informations
+   about the device (versions, etc), and Google decides depending on that
+   info on a verdict. In our model, KS directly sends the verdict alongside
+   buildInfo instead. We keep buildInfo to model the patched version
+   of the protocol later.
+   - similarly, the Keystore actually sends information about the boot loader,
+   which Google uses to produce a verdict. We abstract this by having
+   KS send the bootLoader verdict itself instead. *)
+let Keystore(appID:appIdentifier,
+             deviceID:deviceIdentifier,
+             buildInfo:bitstring,
+             buildInfoVerdict:bool, (* abstraction of the verdict *)
+             bootLoader:bool,
+             kKS:signkey, (* keystore key *)
+             kTEE:signkey, skTEE:bitstring, (* TEE key and its attestation *)
+             vkGoogle:verkey, (* Google's public key *)
+             cKSToPI:channel, cPIToKS:channel) =
+  (* retrieve the attestation key for that device and app *)
+  let kAttest = deriveAttestationKey(deviceID, appID) in
+
+  (* generate a fresh signing key, attest it with the attestation key *)
+  new kFresh:signkey;
+  event KeystoreFresh(kFresh);
+  let skFresh:bitstring = sign(vkb(vk(kFresh)), kAttest) in
+
+  (* receive the message to sign *)
+  in(cPIToKS, m:bitstring);
+
+  (* append to its hash appID, deviceInfo', bootLoader *)
+  let deviceInfo' = (buildInfo, deviceID, buildInfoVerdict) in
+  let keyStoreInfo = (appID, deviceInfo', bootLoader) in
+  let mm = (hash(m), keyStoreInfo) in
+
+  (* sign the message with the attestation key,
+     and the attestation key with the Keystore key,
+     and the Keystore key with the TEE key,
+     and send it + signature + chain *)
+  let s = sign(mm, kFresh) in
+  let sAttest = sign(vkb(vk(kAttest)), kKS) in
+  let skKS = sign(vkb(vk(kKS)), kTEE) in
+  let mKS = (mm, s, vk(kFresh), skFresh,
+                    vk(kAttest), sAttest,
+                    vk(kKS), skKS,
+                    vk(kTEE), skTEE,
+                    vkGoogle) in
+  event KeystoreAttest(appID, deviceID, mKS);
+  out(cKSToPI, mKS).
+
+
+
+(* DroidGuard
+   sends some information that is ignored by Google,
+   but seems to be encrypted and thus gives no additional power to the attacker.
+   We model it by a random bitstring. *)
+let DroidGuard(cDGToPI:channel, cPIToDG:channel) =
+  in(cPIToDG, _:bitstring);
+  new x:bitstring;
+  out(cDGToPI, x).
+

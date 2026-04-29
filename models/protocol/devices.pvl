@@ -1,0 +1,441 @@
+(* -------------------------------------------------------------------------*)
+(*   devices.pvl                                                            *)
+(*                                                                          *)
+(*   This file contains processes modelling the sessions of the protocol    *)
+(*   for each sort of device:                                               *)
+(*    - unrooted,                                                           *)
+(*    - rooted (with changed bootloader),                                   *)
+(*    - rooted (without touching the bootloader, thus unpatched).           *)
+(* -------------------------------------------------------------------------*)
+
+
+
+(* One session of PlayIntegrity -- everything under the app,
+   ie PlayIntegrity, AndroidOS, Keystore, DroidGuard *)
+let DeviceOneSession(appID:appIdentifier,
+                     userCred:userCredential,
+                     appSource:bool,
+                     appCert:bitstring,
+                     deviceID:deviceIdentifier,
+                     buildInfo:bitstring,
+                     buildInfoVerdict:bool,
+                     bootLoader:bool,
+                     kKS:signkey,
+                     kTEE:signkey, skTEE:bitstring,
+                     vkGoogle:verkey,
+                     cPIToApp:channel,    cAppToPI:channel,
+                     cPIToOS:channel,     cOSToPI:channel,
+                     cPIToKS:channel,     cKSToPI:channel, 
+                     cPIToDG:channel,     cDGToPI:channel,
+                     cPIToG:channel,      cGToPI:channel) =
+  (
+    PlayIntegrity(appID, deviceID, cPIToApp, cAppToPI, cPIToOS, cOSToPI,
+                  cPIToKS, cKSToPI, cPIToDG, cDGToPI, cPIToG, cGToPI)
+  |
+    AndroidOS(appID, userCred, appSource, appCert,
+              deviceID, buildInfo, cOSToPI, cPIToOS)
+  |
+    Keystore(playIntegrityID, deviceID, buildInfo,
+             buildInfoVerdict, bootLoader,
+             kKS, kTEE, skTEE, vkGoogle,
+             cKSToPI, cPIToKS) 
+  |
+    DroidGuard(cDGToPI, cPIToDG)
+  ).
+
+
+
+(* One session on an unrooted device:
+   all channels are private, verdict bootLoader is positive.
+   buildInfoVerdict can go either way depending on whether the device
+   is patched, appSource as well depending on the app. *)
+let UnrootedDeviceOneSession(appID:appIdentifier, 
+                            userCred:userCredential,
+                            appSource:bool,
+                            appCert:bitstring,
+                            buildInfo:bitstring,
+                            buildInfoVerdict:bool,
+                            deviceID:deviceIdentifier,
+                            kKS:signkey,
+                            kTEE:signkey, skTEE:bitstring,
+                            vkGoogle:verkey,
+                            cPIToApp:channel, cAppToPI:channel,
+                            cPIToG:channel, cGToPI:channel) =
+  new cPIToOS:channel;     new cOSToPI:channel;
+  new cPIToKS:channel;     new cKSToPI:channel; 
+  new cPIToDG:channel;     new cDGToPI:channel;
+  DeviceOneSession(appID, userCred,
+                   appSource,
+                   appCert,
+                   deviceID,
+                   buildInfo,
+                   buildInfoVerdict,
+                   true, (* bootLoader *)
+                   kKS, kTEE, skTEE, vkGoogle,
+                   cPIToApp,    cAppToPI,
+                   cPIToOS,     cOSToPI,
+                   cPIToKS,     cKSToPI, 
+                   cPIToDG,     cDGToPI,
+                   cPIToG,      cGToPI).
+
+
+(* One session on a rooted device:
+   all channels are public, verdict bootLoader is negative.
+   buildInfoVerdict can go either way depending on whether the device
+   is patched, appSource as well depending on the app. *)
+let RootedDeviceOneSession(appID:appIdentifier,
+                           userCred:userCredential,
+                           appSource:bool,
+                           appCert:bitstring,
+                           buildInfo:bitstring,
+                           buildInfoVerdict:bool,
+                           deviceID:deviceIdentifier,
+                           kKS:signkey,
+                           kTEE:signkey, skTEE:bitstring,
+                           vkGoogle:verkey) =
+  DeviceOneSession(appID, userCred,
+                   appSource,
+                   appCert,
+                   deviceID,
+                   buildInfo,
+                   buildInfoVerdict,
+                   false, (* bootLoader *)
+                   kKS, kTEE, skTEE, vkGoogle,
+                   pub, pub, pub, pub, pub, pub, pub, pub, pub, pub).
+
+
+(* One session on an unpatched rooted device:
+   all channels are public, verdict bootLoader is still positive,
+   but this can only be done on an unpatched device, so buildInfoVerdict is
+   negative.
+   appSource can go either way depending on the app. *)
+let UnpatchedRootedDeviceOneSession(appID:appIdentifier,
+                         userCred:userCredential,
+                         appSource:bool,
+                         appCert:bitstring,
+                         buildInfo:bitstring,
+                         deviceID:deviceIdentifier,
+                         kKS:signkey,
+                         kTEE:signkey, skTEE:bitstring,
+                         vkGoogle:verkey) =
+  DeviceOneSession(appID, userCred,
+                   appSource,
+                   appCert,
+                   deviceID,
+                   buildInfo,
+                   false, (* buildInfoVerdict *)
+                   true, (* bootLoader *)
+                   kKS, kTEE, skTEE, vkGoogle,
+                   pub, pub, pub, pub, pub, pub, pub, pub, pub, pub).
+
+
+
+
+(* An unrooted device
+   - patched or unpatched (chosen by attacker)
+   - running any number of sessions of PlayIntegrity for
+     * honest apps,
+     * attacker apps,
+     * spoofed apps
+   - the attacker can ask the Keystore for attestations
+     for any appID other than PlayIntegrity's (overapproximation)
+*)
+let UnrootedDevice(kKS:signkey, kGoogle:signkey) =
+  (* unique, non-secret deviceID *)
+  new deviceID:deviceIdentifier; out(pub, deviceID);
+
+  (* unique TEE key and its certificate (ver key and cert are not secret) *)
+  new kTEE:signkey; 
+  let skTEE = sign(vkb(vk(kTEE)), kGoogle) in
+  out(pub, vk(kTEE)); out(pub, skTEE);
+  event TEEKey(kTEE);
+
+  (* attacker chooses whether the device is patched *)
+  in(pub, buildInfo:bitstring);
+  in(pub, buildInfoVerdict:bool);
+  event BuildInfoAndVerdict(buildInfo, buildInfoVerdict);
+
+  event DeviceStatus(deviceID, unrootedDevice, buildInfoVerdict);
+
+  (* Secret user credential (one per device) *)
+  let userCred = deriveUserCredential(deviceID) in
+  event UserCredOnDevice(deviceID, userCred);
+    
+  (       
+  (* App sessions
+     On an unrooted device, all internal channels are secure,
+     as well as channels between Google and PlayIntegrity
+     (modelling a TLS connection in the latter case).
+     Thus all instances of PlayIntegrity are spawned together
+     with a special instance of the Google server with which they share
+     private channels. *)
+  
+    (* honest app session: attacker chooses a honest appID,
+       appSource, appCert.
+       appCert and appSource are arbitrary: the attacker can choose
+       to install an honest app not from the playstore, and with a 
+       different certificate. *)
+    ! (in(pub, appID:appIdentifier);
+       in(pub, appSource:bool);
+       in(pub, appCert:bitstring);
+       event HonestAppID(appID);
+       event RealAppOnDevice(deviceID, appID, appSource, appCert);
+
+       new cAppToPI:channel; new cPIToApp:channel;
+       new cAppToCloud:channel; new cCloudToApp:channel;
+       new cPIToG:channel; new cGToPI:channel;
+
+       (*  An honest app instance is created together with a cloud instance
+          with which it shares secure channels,
+          abstracting the mechanism by which the app asks its cloud server
+          to start a session. *)
+       (
+          App(appID, deviceID, cAppToPI, cPIToApp, cAppToCloud, cCloudToApp)
+        |
+          AppCloud(appID, deviceID, cCloudToApp, cAppToCloud)
+        |
+          UnrootedDeviceOneSession(appID, userCred, appSource, appCert,
+                                   buildInfo, buildInfoVerdict,
+                                   deviceID, kKS, kTEE, skTEE, vk(kGoogle),
+                                   cPIToApp, cAppToPI,
+                                   cPIToG, cGToPI)
+        |
+          Google(kGoogle, cGToPI, cPIToG)
+       )
+      )
+
+   |
+    (* attacker app session: attacker chooses an attacker appID,
+       appSource, appCert,
+       no process for the app/cloud as the attacker runs it *)
+    ! (in(pub, appID:appIdentifier);
+       in(pub, appSource:bool);
+       in(pub, appCert:bitstring);
+       event AttackerAppID(appID);
+       event AttackerAppOnDevice(deviceID, appID, appSource, appCert);
+      
+       new cPIToG:channel; new cGToPI:channel;
+       
+       (
+          UnrootedDeviceOneSession(appID, userCred, appSource, appCert,
+                                   buildInfo, buildInfoVerdict,
+                                   deviceID, kKS, kTEE, skTEE, vk(kGoogle),
+                                   pub, pub, cPIToG, cGToPI)
+        |
+          Google(kGoogle, cGToPI, cPIToG)
+       )
+      )
+
+   |
+    (* spoofed app session: attacker chooses a honest appID to spoof,
+       appSource must be invalid,
+       no process for the app as the attacker runs it *)
+    ! (in(pub, appID:appIdentifier);
+       in(pub, appCert:bitstring);
+       event HonestAppID(appID);
+       event SpoofedAppOnDevice(deviceID, appID, appCert);
+
+       new cPIToG:channel; new cGToPI:channel;
+
+       (
+          UnrootedDeviceOneSession(appID, userCred, false, appCert,
+                                   buildInfo, buildInfoVerdict,
+                                   deviceID, kKS, kTEE, skTEE, vk(kGoogle),
+                                   pub, pub, cPIToG, cGToPI)
+        |
+          Google(kGoogle, cGToPI, cPIToG)
+       )
+      )
+
+   |
+    (* the attacker can directly ask the Keystore to attest anything
+       for its any appID except PlayIntegrity's.
+       (this is an overapproximation: in reality, the attacker does this
+        by writing its own app that spoofs the appID, and thus it is only
+        possible if the real app is not also installed) *)
+    ! (in(pub, appID:appIdentifier);
+       if appID <> playIntegrityID then
+         Keystore(appID, deviceID, buildInfo,
+                  buildInfoVerdict, true,
+                  kKS, kTEE, skTEE, vk(kGoogle),
+                  pub, pub)
+      )
+  ).
+
+
+
+
+
+
+(* A rooted device
+   - patched or unpatched (chosen by attacker)
+   - running any number of sessions of PlayIntegrity for
+     * honest apps,
+     * attacker apps,
+     * spoofed apps case is included in the honest case,
+       since all channels are public anyway
+   - the attacker can ask the Keystore for attestations
+     for any appID other than PlayIntegrity's (overapproximation)
+*)
+let RootedDevice(kKS:signkey, kGoogle:signkey) =
+  (* unique, non-secret deviceID *)
+  new deviceID:deviceIdentifier; out(pub, deviceID);
+
+  (* unique TEE key and its certificate (ver key and cert are not secret) *)
+  new kTEE:signkey;
+  let skTEE = sign(vkb(vk(kTEE)), kGoogle) in
+  out(pub, vk(kTEE)); out(pub, skTEE);
+  event TEEKey(kTEE);
+
+  (* attacker choses whether the device is patched *)
+  in(pub, buildInfo:bitstring);
+  in(pub, buildInfoVerdict:bool);
+  event BuildInfoAndVerdict(buildInfo, buildInfoVerdict);
+
+  event DeviceStatus(deviceID, rootedDevice, buildInfoVerdict);
+
+  (* Public user credential (one per device) *)
+  let userCred = deriveUserCredential(deviceID) in
+  event UserCredOnDevice(deviceID, userCred);
+  out(pub, userCred);
+  (
+   (* On a rooted device, all internal communications are on public channels,
+      as well as communications to the app, app cloud, and Google servers.
+      Thus there is no need for a dedicated Google process here. *)
+  
+     (* honest app session: attacker chooses a honest appID, appSource, appCert,
+        public channels everywhere since device is rooted *)
+    ! (in(pub, appID:appIdentifier);
+       in(pub, appSource:bool);
+       in(pub, appCert:bitstring);
+       event HonestAppID(appID);
+       event RealAppOnDevice(deviceID, appID, appSource, appCert);
+  
+       (* An honest app instance is created together with a cloud instance,
+          abstracting the mechanism by which the app asks its cloud server
+          to start a session (assumed secure),
+          but after that the communication between app & cloud is not secure. *)
+       (
+          App(appID, deviceID, pub, pub, pub, pub)
+        |
+          AppCloud(appID, deviceID, pub, pub)
+        |
+          RootedDeviceOneSession(appID, userCred, appSource, appCert,
+                                 buildInfo, buildInfoVerdict,
+                                 deviceID, kKS, kTEE, skTEE, vk(kGoogle))
+       )
+      )
+  
+   |
+    (* attacker app session: attacker chooses an attacker appID,
+       appSource, appCert,
+       no process for the app as the attacker runs it *)
+    ! (in(pub, appID:appIdentifier);
+       in(pub, appSource:bool);
+       in(pub, appCert:bitstring);
+       event AttackerAppID(appID);
+       event AttackerAppOnDevice(deviceID, appID, appSource, appCert);
+
+       RootedDeviceOneSession(appID, userCred, appSource, appCert,
+                              buildInfo, buildInfoVerdict,
+                              deviceID, kKS, kTEE, skTEE, vk(kGoogle))
+      )
+  
+   |
+    (* the attacker can directly ask the Keystore to attest anything
+       for any appID *)
+    ! (in(pub, appID:appIdentifier);
+       Keystore(appID, deviceID, buildInfo,
+                buildInfoVerdict, false,
+                kKS, kTEE, skTEE, vk(kGoogle),
+                pub, pub)
+      )
+  ).
+
+
+
+(* An unpatched rooted device
+   - must be unpatched, but has normal bootLoader
+   - running any number of sessions of PlayIntegrity for
+     * honest apps,
+     * attacker apps,
+     * spoofed apps case is included in the honest case,
+       since all channels are public anyway
+   - the attacker can ask the Keystore for attestations
+     for any appID other than PlayIntegrity's (overapproximation)
+*)
+let UnpatchedRootedDevice(kKS:signkey, kGoogle:signkey) =
+  (* unique, non-secret deviceID *)
+  new deviceID:deviceIdentifier; out(pub, deviceID);
+
+  (* unique TEE key and its certificate (ver key and cert are not secret) *)
+  new kTEE:signkey;
+  let skTEE = sign(vkb(vk(kTEE)), kGoogle) in
+  out(pub, vk(kTEE)); out(pub, skTEE);
+  event TEEKey(kTEE);
+
+  (* input buildInfo from attacker but the associated verdict
+     is forced to be negative *)
+  in(pub, buildInfo:bitstring);
+  event BuildInfoAndVerdict(buildInfo, false);
+
+  event DeviceStatus(deviceID, unpatchedRootedDevice, false);
+
+  (* Public user credential (one per device) *)
+    let userCred = deriveUserCredential(deviceID) in
+    event UserCredOnDevice(deviceID, userCred);
+    out(pub, userCred);
+
+  (* On a rooted device, all internal communications are on public channels,
+     as well as communications to the app, app cloud, and Google servers.
+     Thus there is no need for a dedicated Google process here. *)
+  (
+    (* honest app session: attacker chooses an honest appID, appSource, appCert,
+       public channels everywhere since device is rooted *)
+    ! (in(pub, appID:appIdentifier);
+       in(pub, appSource:bool);
+       in(pub, appCert:bitstring);
+       event HonestAppID(appID);
+       event RealAppOnDevice(deviceID, appID, appSource, appCert);
+  
+       (* An honest app instance is created together with a cloud instance,
+          abstracting the mechanism by which the app asks its cloud server
+         to start a session (assumed secure),
+          but after that the communication between app & cloud is not secure. *)
+       (
+          App(appID, deviceID, pub, pub, pub, pub)
+        |
+          AppCloud(appID, deviceID, pub, pub)
+        |
+          UnpatchedRootedDeviceOneSession(appID, userCred, appSource, appCert,
+                                          buildInfo,
+                                          deviceID, kKS, kTEE,
+                                          skTEE, vk(kGoogle))
+       )
+      )
+  
+   |
+    (* attacker app session: attacker chooses an attacker appID,
+       appSource, appCert,
+       no process for the app as the attacker runs it *)
+    ! (in(pub, appID:appIdentifier);
+       event AttackerAppID(appID);
+       in(pub, appSource:bool);
+       in(pub, appCert:bitstring);
+       event AttackerAppOnDevice(deviceID, appID, appSource, appCert);
+  
+       UnpatchedRootedDeviceOneSession(appID, userCred, appSource, appCert,
+                                       buildInfo,
+                                       deviceID, kKS, kTEE, skTEE, vk(kGoogle))
+      )
+  
+   |
+    (* the attacker can directly ask the Keystore to attest anything
+       for any appID *)
+    ! (in(pub, appID:appIdentifier);
+       Keystore(appID, deviceID, buildInfo,
+                false, true,
+                kKS, kTEE, skTEE, vk(kGoogle),
+                pub, pub)
+      )
+  ).

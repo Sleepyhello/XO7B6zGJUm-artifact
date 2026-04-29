@@ -1,0 +1,25 @@
+(* -------------------------------------------------------------------------*)
+(*   protocol.pvl                                                           *)
+(*                                                                          *)
+(*   This file contains the process modelling the entire PlayIntegrity      *)
+(*   protocol, built from the components and processes in the other files.  *)
+(* -------------------------------------------------------------------------*)
+
+let PlayIntegritySystem =
+  new kGoogle:signkey; out(pub, vk(kGoogle));
+  event HonestAppID(playIntegrityID); (* PlayIntegrity is always honest *)
+
+    (* Give the attacker the key of any attacker app *)
+    ! (in(pub, appID:appIdentifier);
+       event AttackerAppID(appID);
+       out(pub, deriveAppKey(appID)))
+  |
+    ! Google(kGoogle, pub, pub)
+  |
+    ! (new kKS:signkey; out(pub, vk(kKS)); 
+         ! UnrootedDevice(kKS, kGoogle)
+       |
+         ! RootedDevice(kKS, kGoogle)
+       |
+         ! UnpatchedRootedDevice(kKS, kGoogle)
+      ).
