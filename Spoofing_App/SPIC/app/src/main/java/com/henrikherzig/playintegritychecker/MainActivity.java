@@ -88,7 +88,8 @@ public class MainActivity extends AppCompatActivity {
     }
 
     public void targetFunction() {
-        String nonce = "QWxsIHlvdXIgYmFzZSBhcmUgYmVsb25nIHRvIHVzZQ==";
+        String nonce = new String(new byte[]{99, 121, 65, 87, 90, 70, 79, 115, 107, 111, 57, 57, 88, 81, 70, 87, 81, 49, 86, 115, 114, 118, 80, 66, 107, 85, 116, 70, 103, 89, 115, 109, 103, 106, 84, 74, 120, 121, 52, 77, 74, 67, 53, 82, 84, 77, 68, 82, 114, 122});
+
         IntegrityManager integrityManager = IntegrityManagerFactory.create(getApplicationContext());
 
         Task<IntegrityTokenResponse> integrityTokenResponse = integrityManager.requestIntegrityToken(IntegrityTokenRequest.builder()
@@ -102,6 +103,8 @@ public class MainActivity extends AppCompatActivity {
                 jwe = (JsonWebEncryption) JsonWebStructure
                         .fromCompactSerialization(response.token());
 
+                Log.i("SPIC", "Encrypted verdict below:");
+                Log.i("SPIC", response.token());
                 byte[] decryptionKeyBytes = Base64.decode(base64_of_encoded_decryption_key, Base64.DEFAULT);
                 SecretKey decryptionKey =
                         new SecretKeySpec(
