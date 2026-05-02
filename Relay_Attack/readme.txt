@@ -24,6 +24,21 @@ The attack scenario follows a structured sequence:
 5. Integrity Verdict Bypass  
    By leveraging the relayed certificate chain, the client is able to obtain a valid device integrity verdict.
 
+* Project Architecture
+----------------------
+
+The project is organized into multiple components that coordinate to perform the described workflows:
+
+-  Frida Scripts  
+   The Frida instrumentation logic is implemented in `client.ts` and `attestation.ts`. These scripts are responsible for hooking into the relevant processes and extracting or injecting attestation-related data at runtime.  
+   The project uses `frida-server` version 17.9.3 to enable dynamic instrumentation on the devices.
+
+-  Python Components 
+   The `client.py` and `server.py` scripts handle automation of the Frida interactions and manage communication between the client and server components over a network connection.
+
+-  Shell Scripts  
+   The `client.sh` and `server.sh` scripts serve as entry points for execution. They are responsible for compiling the Frida scripts and invoking the corresponding Python scripts with the appropriate parameters.
+
 * Requirements
 --------------
 
