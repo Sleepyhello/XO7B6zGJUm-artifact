@@ -11,7 +11,7 @@
 -   Relay_Attack 
     This directory includes the scripts required to implement the partial relay attack.  
 
-- Relay_Attack_full
+-   Relay_Attack_full
     This directory includes the scripts required to implement the full relay attack.
 
 -   Spoofing_App  
