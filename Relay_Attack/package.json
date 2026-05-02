@@ -1,14 +1,19 @@
 {
   "name": "relay_attack",
   "version": "1.0.0",
-  "main": "attestation.js",
+  "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
+  "keywords": [],
   "author": "",
   "license": "ISC",
   "description": "",
   "dependencies": {
-    "fs": "^0.0.1-security"
+    "frida-java-bridge": "^7.0.13"
+  },
+  "devDependencies": {
+    "@types/frida-gum": "^19.0.2",
+    "frida-compile": "^19.0.5"
   }
 }
