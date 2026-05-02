@@ -10,7 +10,9 @@
 
 -   Relay_Attack 
     This directory includes the scripts required to implement the partial relay attack.  
-    Scripts for a full relay attack are not provided, as automating the class discovery required for such an implementation was not achieved.
+
+- Relay_Attack_full
+    This directory includes the scripts required to implement the full relay attack.
 
 -   Spoofing_App  
     This directory contains the spoofing application along with the necessary scripts to perform the spoofing attack.
